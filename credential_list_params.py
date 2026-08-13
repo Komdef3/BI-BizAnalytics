@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 from typing_extensions import Annotated, TypedDict
 
 from ...._utils import PropertyInfo
 from ...anthropic_beta_param import AnthropicBetaParam
 
-__all__ = ["VersionListParams"]
+__all__ = ["CredentialListParams"]
 
 
-class VersionListParams(TypedDict, total=False):
-    limit: Optional[int]
-    """Number of items to return per page.
+class CredentialListParams(TypedDict, total=False):
+    include_archived: bool
+    """Whether to include archived credentials in the results."""
 
-    Defaults to `20`. Ranges from `1` to `1000`.
-    """
+    limit: int
+    """Maximum number of credentials to return per page. Defaults to 20, maximum 100."""
 
-    page: Optional[str]
-    """Optionally set to the `next_page` token from the previous response."""
+    page: str
+    """Opaque pagination token from a previous `list_credentials` response."""
 
     betas: Annotated[List[AnthropicBetaParam], PropertyInfo(alias="anthropic-beta")]
     """Optional header to specify the beta version(s) you want to use."""

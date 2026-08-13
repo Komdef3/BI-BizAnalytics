@@ -5,21 +5,20 @@ from __future__ import annotations
 from typing import List, Optional
 from typing_extensions import Annotated, TypedDict
 
+from ...._types import FileTypes, SequenceNotStr
 from ...._utils import PropertyInfo
 from ...anthropic_beta_param import AnthropicBetaParam
 
-__all__ = ["VersionListParams"]
+__all__ = ["VersionCreateParams"]
 
 
-class VersionListParams(TypedDict, total=False):
-    limit: Optional[int]
-    """Number of items to return per page.
+class VersionCreateParams(TypedDict, total=False):
+    files: Optional[SequenceNotStr[FileTypes]]
+    """Files to upload for the skill.
 
-    Defaults to `20`. Ranges from `1` to `1000`.
+    All files must be in the same top-level directory and must include a SKILL.md
+    file at the root of that directory.
     """
-
-    page: Optional[str]
-    """Optionally set to the `next_page` token from the previous response."""
 
     betas: Annotated[List[AnthropicBetaParam], PropertyInfo(alias="anthropic-beta")]
     """Optional header to specify the beta version(s) you want to use."""
