@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizAnalytics — Intelligent Business Analytics</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i class="fas fa-chart-line"></i>
+            <span>BizAnalytics</span>
+        </div>
+        <div class="nav-links" id="nav-links">
+            <a href="index.html" class="active">Home</a>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="predict.html">Predict</a>
+            <a href="advisory.html">Advisory</a>
+            <a href="transactions.html">Record Sale</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Intelligent Business Analytics</h1>
+            <p>
+                Upload your sales data and get powerful insights,
+                demand predictions, and AI-powered business advice.
+            </p>
+            <a href="#upload-section" class="btn-primary">
+                <i class="fas fa-rocket"></i> Get Started
+            </a>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="feature-card">
+            <i class="fas fa-chart-bar"></i>
+            <h3>Sales Analytics</h3>
+            <p>Visualize top products, sales trends, and customer behavior.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-brain"></i>
+            <h3>Demand Prediction</h3>
+            <p>Use machine learning to predict demand and plan restocking.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-robot"></i>
+            <h3>AI Advisory</h3>
+            <p>Chat with an AI advisor that knows your business data.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-pen"></i>
+            <h3>Record Sales</h3>
+            <p>Manually enter transactions directly on the web app.</p>
+        </div>
+    </section>
+
+    <section class="upload-section" id="upload-section">
+        <h2>Upload Your Sales Data</h2>
+        <p>Supported formats: CSV, Excel (.xlsx) — any column names accepted</p>
+
+        <div class="upload-box" id="upload-box">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <p>Drag &amp; drop your file here or</p>
+            <label for="file-input" class="btn-primary">Browse File</label>
+            <input type="file" id="file-input"
+                   accept=".csv,.xlsx,.xls" hidden>
+            <p class="file-name" id="file-name">No file selected</p>
+        </div>
+
+        <!--
+            type="button" is CRITICAL here.
+            Without it, the browser treats this as a submit button
+            which causes the page to reload every time it is clicked.
+        -->
+        <button type="button" class="btn-primary" id="upload-btn" disabled>
+            <i class="fas fa-upload"></i> Upload &amp; Detect Columns
+        </button>
+
+        <div class="status-box" id="status-box" style="display:none;">
+            <div id="status-content"></div>
+        </div>
+
+        <div id="mapping-section" style="display:none;">
+            <h3 style="margin:1.5rem 0 0.5rem;">
+                <i class="fas fa-columns"></i> Confirm Column Mapping
+            </h3>
+            <p style="color:#64748b; margin-bottom:0.5rem;">
+                Map each system column to the matching column in your file.
+            </p>
+            <p style="color:#10b981; font-size:0.9rem; margin-bottom:1rem;">
+                <i class="fas fa-info-circle"></i>
+                <strong>Amount</strong> — if not mapped, it will be calculated
+                as Quantity × Unit_Price automatically.<br>
+                <strong>Channel</strong> — if not mapped, all rows default
+                to <em>Onsite</em>.<br>
+                <strong>Category</strong> — if not mapped, all rows default
+                to <em>Consumables</em>.
+            </p>
+            <div id="mapping-table"></div>
+            <!--
+                type="button" is CRITICAL here too.
+                Prevents the confirm button from reloading the page.
+            -->
+            <button type="button" class="btn-primary" id="confirm-btn"
+                    style="margin-top:1rem">
+                <i class="fas fa-check"></i> Confirm &amp; Analyze
+            </button>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <p>Built by Brian Arrey — Computer Engineering &copy; 2025</p>
+    </footer>
+
+    <!--
+        ALL JavaScript is written directly in this script tag.
+        This avoids loading order problems that happen when
+        auth.js and main.js are loaded as separate files and
+        compete with each other causing the page to reload.
+    -->
+    <script>
+    'use strict';
+
+    // Base URL for all backend API calls
+   const API_BASE = 'https://bizanalytics-production-66f5.up.railway.app/api';
+   
+    // System columns the backend requires
+    // These are shown on the LEFT side of the mapping table
+    const REQUIRED_COLUMNS = [
+        'Product', 'Category', 'Quantity',
+        'Date', 'Unit_Price', 'Amount', 'Channel'
+    ];
+
+    // Optional columns — kept if found in the uploaded file
+    const OPTIONAL_COLUMNS = ['Customer_Name', 'Sex'];
+
+    // Columns that have default values if not mapped by the user
+    // key   = system column name
+    // value = default fill value
+    const DEFAULT_VALUES = {
+        'Amount':   'CALCULATE',   // Quantity x Unit_Price
+        'Channel':  'Onsite',      // Default channel
+        'Category': 'Consumables'  // Default category
+    };
+
+    // Upload state — stored between upload and confirm steps
+    let uploadedFilename = '';
+    let uploadedColumns  = [];
+
+    // ── Auth Check (synchronous) ──────────────────────────────
+    // We check localStorage immediately — no async fetch needed.
+    // This prevents any timing issues that cause page reloads.
+    (function checkAuth() {
+        const saved = localStorage.getItem('bizuser');
+        if (!saved) {
+            // Not logged in — redirect to login
+            window.location.replace('login.html');
+            return;
+        }
+        try {
+            const user     = JSON.parse(saved);
+            const navLinks = document.getElementById('nav-links');
+            if (!navLinks) return;
+
+            // Prevent adding navbar user element twice
+            if (document.querySelector('.nav-user')) return;
+
+            const el = document.createElement('div');
+            el.className = 'nav-user';
+            el.innerHTML =
+                '<span class="nav-username">' +
+                    '<i class="fas fa-user-circle"></i> ' + user.name +
+                '</span>' +
+                '<button type="button" class="nav-logout-btn" ' +
+                        'onclick="handleLogout()">' +
+                    '<i class="fas fa-sign-out-alt"></i> Logout' +
+                '</button>';
+            navLinks.appendChild(el);
+        } catch(e) {
+            window.location.replace('login.html');
+        }
+    })();
+
+    // ── Logout Function ───────────────────────────────────────
+    function handleLogout() {
+        fetch(API_BASE + '/auth/logout', {
+            method: 'POST',
+            credentials: 'include'
+        }).catch(function() {}).finally(function() {
+            localStorage.removeItem('bizuser');
+            window.location.replace('login.html');
+        });
+    }
+
+    // ── DOM Element References ────────────────────────────────
+    var fileInput      = document.getElementById('file-input');
+    var uploadBtn      = document.getElementById('upload-btn');
+    var fileNameEl     = document.getElementById('file-name');
+    var statusBox      = document.getElementById('status-box');
+    var statusContent  = document.getElementById('status-content');
+    var mappingSection = document.getElementById('mapping-section');
+    var mappingTable   = document.getElementById('mapping-table');
+    var confirmBtn     = document.getElementById('confirm-btn');
+
+    // ── File Selected via Browse Button ───────────────────────
+    fileInput.addEventListener('change', function() {
+        var file = fileInput.files[0];
+        if (file) {
+            fileNameEl.textContent = file.name;
+            uploadBtn.disabled     = false;
+        }
+    });
+
+    // ── Drag Over Upload Box ──────────────────────────────────
+    var uploadBox = document.getElementById('upload-box');
+
+    uploadBox.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        uploadBox.style.background = '#eff6ff';
+    });
+
+    uploadBox.addEventListener('dragleave', function() {
+        uploadBox.style.background = '';
+    });
+
+    // ── File Dropped onto Upload Box ──────────────────────────
+    uploadBox.addEventListener('drop', function(e) {
+        e.preventDefault();
+        uploadBox.style.background = '';
+        var file = e.dataTransfer.files[0];
+        if (file) {
+            fileInput.files        = e.dataTransfer.files;
+            fileNameEl.textContent = file.name;
+            uploadBtn.disabled     = false;
+        }
+    });
+
+    // ── Upload Button Click ───────────────────────────────────
+    // type="button" on the HTML element prevents reload.
+    // e.preventDefault() and e.stopPropagation() are added
+    // as an extra safety layer.
+    uploadBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var file = fileInput.files[0];
+        if (!file) return;
+
+        // Show loading spinner
+        statusBox.style.display      = 'block';
+        statusContent.innerHTML      =
+            '<div class="spinner"></div>' +
+            '<p>Uploading and checking columns...</p>';
+        uploadBtn.disabled           = true;
+        mappingSection.style.display = 'none';
+
+        // Build form data with the file
+        var formData = new FormData();
+        formData.append('file', file);
+
+        // Send to backend
+        fetch(API_BASE + '/upload/', {
+            method:      'POST',
+            body:        formData,
+            credentials: 'include'
+        })
+        .then(function(res) { return res.json().then(function(data) {
+            return { ok: res.ok, data: data };
+        }); })
+        .then(function(result) {
+            var ok   = result.ok;
+            var data = result.data;
+
+            if (!ok) {
+                statusContent.innerHTML =
+                    '<p class="status-error">' +
+                    '<i class="fas fa-times-circle"></i> ' +
+                    'Error: ' + data.error + '</p>';
+                uploadBtn.disabled = false;
+                return;
+            }
+
+            if (data.perfect_match) {
+                // ── All columns matched — go to dashboard ─────
+                statusContent.innerHTML =
+                    '<p class="status-success">' +
+                    '<i class="fas fa-check-circle"></i> ' +
+                    'All columns matched! ' + data.rows +
+                    ' records loaded. Redirecting...</p>';
+                setTimeout(function() {
+                    window.location.href = 'dashboard.html';
+                }, 1500);
+
+            } else {
+                // ── Mismatch — show mapping table ─────────────
+                uploadedFilename = data.filename;
+                uploadedColumns  = data.uploaded_columns;
+
+                statusContent.innerHTML =
+                    '<p style="color:#f59e0b">' +
+                    '<i class="fas fa-exclamation-triangle"></i> ' +
+                    '<strong>Column mismatch detected.</strong> ' +
+                    'Please map your columns below.</p>' +
+                    '<p>Missing: <strong>' +
+                    data.missing_columns.join(', ') +
+                    '</strong></p>';
+
+                buildMappingTable(data.uploaded_columns);
+                mappingSection.style.display = 'block';
+
+                setTimeout(function() {
+                    mappingSection.scrollIntoView({ behavior: 'smooth' });
+                }, 300);
+            }
+
+            uploadBtn.disabled = false;
+        })
+        .catch(function(err) {
+            statusContent.innerHTML =
+                '<p class="status-error">' +
+                '<i class="fas fa-times-circle"></i> ' +
+                'Could not connect to server. ' +
+                'Make sure the backend is running.</p>';
+            uploadBtn.disabled = false;
+        });
+    });
+
+    // ── Build Mapping Table ───────────────────────────────────
+    // LEFT  = system column name (fixed)
+    // RIGHT = dropdown of columns from the uploaded file
+    // Columns with defaults show a note explaining the default
+    function buildMappingTable(cols) {
+
+        // Try to find a matching column by name similarity
+        function autoSuggest(systemCol) {
+            var lower = systemCol.toLowerCase().replace(/_/g, '');
+            var found = null;
+            cols.forEach(function(c) {
+                var cl = c.toLowerCase().replace(/[^a-z]/g, '');
+                if (cl === lower || cl.includes(lower) ||
+                    lower.includes(cl)) {
+                    found = c;
+                }
+            });
+            return found;
+        }
+
+        // Build rows for required columns
+        var requiredRows = REQUIRED_COLUMNS.map(function(col) {
+            var sug     = autoSuggest(col);
+            var hasDefault = DEFAULT_VALUES.hasOwnProperty(col);
+            var defaultNote = '';
+
+            if (col === 'Amount') {
+                defaultNote =
+                    '<br><small style="color:#10b981">' +
+                    'Default: Quantity × Unit_Price</small>';
+            } else if (col === 'Channel') {
+                defaultNote =
+                    '<br><small style="color:#10b981">' +
+                    'Default: Onsite</small>';
+            } else if (col === 'Category') {
+                defaultNote =
+                    '<br><small style="color:#10b981">' +
+                    'Default: Consumables</small>';
+            }
+
+            var options = '<option value="">-- Use default --</option>';
+            if (!hasDefault) {
+                options = '<option value="">-- Not in my file --</option>';
+            }
+            cols.forEach(function(c) {
+                var sel = (c === sug) ? ' selected' : '';
+                options += '<option value="' + c + '"' + sel + '>' +
+                           c + '</option>';
+            });
+
+            return '<tr>' +
+                '<td><strong>' + col + '</strong>' +
+                (hasDefault
+                    ? '<span class="required"> *</span>' +
+                      defaultNote
+                    : '<span class="required"> *</span>') +
+                '</td>' +
+                '<td><select class="map-select" data-system="' +
+                col + '">' + options + '</select></td>' +
+                '</tr>';
+        }).join('');
+
+        // Build rows for optional columns
+        var optionalRows = OPTIONAL_COLUMNS.map(function(col) {
+            var sug = autoSuggest(col);
+            var options = '<option value="">-- Not in my file --</option>';
+            cols.forEach(function(c) {
+                var sel = (c === sug) ? ' selected' : '';
+                options += '<option value="' + c + '"' + sel + '>' +
+                           c + '</option>';
+            });
+            return '<tr>' +
+                '<td><strong>' + col + '</strong>' +
+                '<span style="color:#64748b;font-size:0.8rem">' +
+                ' (optional)</span></td>' +
+                '<td><select class="map-select" data-system="' +
+                col + '">' + options + '</select></td>' +
+                '</tr>';
+        }).join('');
+
+        mappingTable.innerHTML =
+            '<table class="mapping-tbl">' +
+            '<thead><tr>' +
+            '<th>System Column</th>' +
+            '<th>Your File Column</th>' +
+            '</tr></thead>' +
+            '<tbody>' +
+            requiredRows +
+            '<tr><td colspan="2" style="background:#f1f5f9;' +
+            'color:#64748b;font-size:0.85rem;padding:0.5rem 1rem">' +
+            'Optional Columns</td></tr>' +
+            optionalRows +
+            '</tbody></table>' +
+            '<p style="color:#64748b;font-size:0.85rem;margin-top:0.5rem">' +
+            '<i class="fas fa-info-circle"></i> ' +
+            'Columns not mapped will be dropped or filled with defaults.' +
+            '</p>';
+    }
+
+    // ── Confirm Mapping Button Click ──────────────────────────
+    confirmBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Read all dropdown selections
+        var selects = document.querySelectorAll('.map-select');
+        var mapping = {};
+        selects.forEach(function(sel) {
+            if (sel.value) {
+                mapping[sel.dataset.system] = sel.value;
+            }
+        });
+
+        // Validate: only non-defaultable required columns must be mapped
+        // Amount, Channel and Category have defaults so they are optional
+        var mustMap = REQUIRED_COLUMNS.filter(function(col) {
+            return !DEFAULT_VALUES.hasOwnProperty(col);
+        });
+
+        var unmapped = mustMap.filter(function(col) {
+            return !mapping[col];
+        });
+
+        if (unmapped.length > 0) {
+            statusBox.style.display = 'block';
+            statusContent.innerHTML =
+                '<p class="status-error">' +
+                '<i class="fas fa-times-circle"></i> ' +
+                'Please map these required columns: ' +
+                '<strong>' + unmapped.join(', ') + '</strong></p>';
+            return;
+        }
+
+        // Show processing spinner
+        statusBox.style.display = 'block';
+        statusContent.innerHTML =
+            '<div class="spinner"></div>' +
+            '<p>Processing and cleaning your data...</p>';
+
+        // Send confirmed mapping to backend
+        fetch(API_BASE + '/upload/confirm', {
+            method:      'POST',
+            headers:     { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body:        JSON.stringify({
+                filename: uploadedFilename,
+                mapping:  mapping
+            })
+        })
+        .then(function(res) { return res.json().then(function(data) {
+            return { ok: res.ok, data: data };
+        }); })
+        .then(function(result) {
+            if (result.ok) {
+                mappingSection.style.display = 'none';
+                statusContent.innerHTML =
+                    '<p class="status-success">' +
+                    '<i class="fas fa-check-circle"></i> ' +
+                    'Data processed! ' + result.data.rows +
+                    ' records ready. Redirecting...</p>';
+                setTimeout(function() {
+                    window.location.href = 'dashboard.html';
+                }, 1500);
+            } else {
+                statusContent.innerHTML =
+                    '<p class="status-error">' +
+                    '<i class="fas fa-times-circle"></i> ' +
+                    result.data.error + '</p>';
+            }
+        })
+        .catch(function() {
+            statusContent.innerHTML =
+                '<p class="status-error">Could not connect to server.</p>';
+        });
+    });
+
+    </script>
+</body>
+</html>
